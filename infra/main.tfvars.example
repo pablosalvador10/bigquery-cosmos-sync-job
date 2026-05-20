@@ -1,7 +1,30 @@
 subscription_id  = "00000000-0000-0000-0000-000000000000"
 environment_name = "dev"
 location         = "eastus"
-backend_image    = "myacr.azurecr.io/app-template-backend:latest"
-frontend_image   = "myacr.azurecr.io/ui-copilot-template:latest"
-enable_cosmos_db = true
-enable_key_vault = false
+
+# --- BigQuery source ---
+bq_project_id      = "my-gcp-project"
+bq_dataset         = "learnsphere"
+bq_location        = "US"
+gcp_sa_secret_name = "gcp-bigquery-sa"
+
+# --- Sync schedule ---
+sync_cron_expression         = "0 2 * * *"   # 02:00 UTC daily
+sync_replica_timeout_seconds = 1800
+sync_replica_retry_limit     = 2
+sync_pipelines               = ["courses", "learners", "recommendations"]
+
+# --- Sync image (azd overrides on deploy) ---
+sync_image = "mcr.microsoft.com/azuredocs/containerapps-helloworld:latest"
+
+# --- Cosmos ---
+cosmos_database      = "learnsphere"
+cosmos_capacity_mode = "serverless"
+
+# --- Alerts ---
+alert_email_receivers = [
+  { name = "oncall", email = "you@example.com" },
+]
+alert_expected_min_rows         = 1
+alert_expected_max_rows         = 10000000
+alert_cosmos_throttle_threshold = 100

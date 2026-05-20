@@ -1,28 +1,34 @@
-version: "3.9"
-
 services:
-  backend:
-    build:
-      context: ./py/apps/app-template
-      dockerfile: Dockerfile
-    container_name: app-template-backend
-    env_file:
-      - .env.example
+  cosmos-emulator:
+    image: mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:vnext-preview
+    container_name: bqcosmos-emulator
     ports:
-      - "8001:8001"
+      - "8081:8081"
+      - "10250-10255:10250-10255"
+    environment:
+      AZURE_COSMOS_EMULATOR_PARTITION_COUNT: "5"
+      AZURE_COSMOS_EMULATOR_ENABLE_DATA_PERSISTENCE: "true"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8001/healthz"]
-      interval: 15s
+      test: ["CMD", "curl", "-fk", "https://localhost:8081/_explorer/emulator.pem"]
+      interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 30
 
-  frontend:
+  sync:
     build:
-      context: ./ts/apps/ui-copilot-template
-      dockerfile: Dockerfile
-    container_name: app-template-frontend
+      context: .
+      dockerfile: py/apps/bq-cosmos-sync/Dockerfile
+    container_name: bqcosmos-sync
+    env_file: .env
+    environment:
+      COSMOS_ENDPOINT: https://cosmos-emulator:8081/
+      COSMOS_AUTH_MODE: key
+      # Default emulator key (well known, safe to commit)
+      COSMOS_KEY: C2y6yDjf5/R+ob0N8A7Cgv30VRDJIWEHLM+4QDU5DE2nQ9nDuVTqobD4b8mGGyPMbIZnqyMsEcaGQy67XIw/Jw==
+      COSMOS_VERIFY_TLS: "false"
+    volumes:
+      - ./.secrets:/secrets:ro    # mount GCP service account JSON here
     depends_on:
-      backend:
+      cosmos-emulator:
         condition: service_healthy
-    ports:
-      - "5173:80"
+    command: ["python", "-m", "bq_cosmos_sync", "run"]

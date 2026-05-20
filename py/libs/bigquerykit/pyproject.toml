@@ -1,0 +1,48 @@
+[project]
+name = "ms-fde-bigquerykit"
+version = "0.0.0"
+description = "Reusable async Google BigQuery I/O toolkit"
+requires-python = "==3.12.*"
+dependencies = [
+    "google-cloud-bigquery>=3.27.0",
+    "google-auth>=2.35.0",
+    "google-api-core>=2.24.0",
+    "opentelemetry-api>=1.33.0",
+]
+
+[dependency-groups]
+dev = [
+    "pyright>=1.1.407",
+    "pytest>=8.4.2",
+    "pytest-asyncio>=1.0.0",
+    "ruff>=0.6.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.9.5,<0.10.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "ms.fde.bigquerykit"
+module-root = "src"
+
+[tool.pyright]
+pythonVersion = "3.12"
+extraPaths = ["src"]
+reportMissingImports = "warning"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 110
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "ASYNC", "S", "BLE", "C4", "PIE", "PT", "SIM", "RUF"]
+ignore = ["S101", "B008", "ASYNC109", "S608", "PT018"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S", "BLE"]

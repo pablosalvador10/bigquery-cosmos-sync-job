@@ -1,26 +1,36 @@
 output "AZURE_RESOURCE_GROUP_NAME" {
   description = "Resource group name"
-  value       = azurerm_resource_group.this.name
+  value       = data.azurerm_resource_group.this.name
 }
 
 output "AZURE_CONTAINER_REGISTRY_LOGIN_SERVER" {
-  description = "ACR login server"
+  description = "ACR login server (used by azd for image push)"
   value       = module.acr.login_server
 }
 
-output "SERVICE_BACKEND_URI" {
-  description = "Backend Container App URL"
-  value       = module.backend.uri
-}
-
-output "SERVICE_FRONTEND_URI" {
-  description = "Frontend Container App URL"
-  value       = module.frontend.uri
-}
-
 output "AZURE_COSMOS_ENDPOINT" {
-  description = "Cosmos DB endpoint (empty if disabled)"
-  value       = var.enable_cosmos_db ? module.cosmos[0].endpoint : ""
+  description = "Cosmos DB endpoint"
+  value       = module.cosmos.endpoint
+}
+
+output "AZURE_COSMOS_DATABASE" {
+  description = "Cosmos DB SQL database name"
+  value       = module.cosmos.database_name
+}
+
+output "AZURE_KEY_VAULT_URI" {
+  description = "Key Vault URI"
+  value       = module.keyvault.uri
+}
+
+output "AZURE_KEY_VAULT_NAME" {
+  description = "Key Vault name (use with `az keyvault secret set`)"
+  value       = module.keyvault.name
+}
+
+output "AZURE_MANAGED_IDENTITY_CLIENT_ID" {
+  description = "Sync job managed identity client ID"
+  value       = azurerm_user_assigned_identity.sync.client_id
 }
 
 output "AZURE_APPINSIGHTS_CONNECTION_STRING" {
@@ -29,12 +39,17 @@ output "AZURE_APPINSIGHTS_CONNECTION_STRING" {
   sensitive   = true
 }
 
-output "AZURE_KEY_VAULT_URI" {
-  description = "Key Vault URI (empty if disabled)"
-  value       = var.enable_key_vault ? module.keyvault[0].uri : ""
+output "AZURE_LOG_ANALYTICS_WORKSPACE_ID" {
+  description = "Log Analytics workspace ID (for KQL queries)"
+  value       = module.logs.workspace_id
 }
 
-output "AZURE_MANAGED_IDENTITY_CLIENT_ID" {
-  description = "Backend managed identity client ID"
-  value       = azurerm_user_assigned_identity.backend.client_id
+output "SYNC_JOB_NAME" {
+  description = "Container App Job name (use with `az containerapp job start`)"
+  value       = module.sync_job.name
+}
+
+output "SYNC_JOB_RESOURCE_ID" {
+  description = "Container App Job ARM resource ID"
+  value       = module.sync_job.id
 }

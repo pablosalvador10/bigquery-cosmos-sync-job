@@ -1,0 +1,48 @@
+[project]
+name = "ms-fde-cosmosdbkit"
+version = "0.0.0"
+description = "Reusable async Azure Cosmos DB I/O toolkit"
+requires-python = "==3.12.*"
+dependencies = [
+    "aiohttp>=3.10.0",
+    "azure-cosmos>=4.9.0",
+    "azure-identity>=1.21.0",
+    "opentelemetry-api>=1.33.0",
+]
+
+[dependency-groups]
+dev = [
+    "pyright>=1.1.407",
+    "pytest>=8.4.2",
+    "pytest-asyncio>=1.0.0",
+    "ruff>=0.6.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.9.5,<0.10.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "ms.fde.cosmosdbkit"
+module-root = "src"
+
+[tool.pyright]
+pythonVersion = "3.12"
+extraPaths = ["src"]
+reportMissingImports = "warning"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 110
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "ASYNC", "S", "BLE", "C4", "PIE", "PT", "SIM", "RUF"]
+ignore = ["S101", "B008", "PT011"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S", "BLE"]

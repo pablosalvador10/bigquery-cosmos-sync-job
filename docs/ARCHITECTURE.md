@@ -1,126 +1,76 @@
-# Architecture
+# architecture
 
-## Overview
-
-This template is a full-stack monorepo for Azure-first agentic applications with real-time chat streaming.
-
-## Components
-
-| Component | Location | Technology |
-|-----------|----------|------------|
-| Backend API | `py/apps/app-template` | FastAPI, Python 3.11+ |
-| Foundry helpers | `py/libs/foundrykit` | Azure AI Agents SDK, OpenTelemetry |
-| Agent config | `py/libs/agentkit` | YAML, Pydantic |
-| MCP server | `py/mcp/mcp-server-template` | FastAPI |
-| Frontend UI | `ts/apps/ui-copilot-template` | React 19, Vite, TypeScript |
-| Infrastructure | `infra/` | Terraform, azd |
-
-## End-to-End Data Flow
+Cron-triggered batch sync. BigQuery is the source of truth, Cosmos is the
+serving copy. Runs once a day, ships ~500 MB, exits.
 
 ```
-User types message in chat UI
-  │
-  ▼
-Frontend: POST /api/v1/chat/stream
-  │  Body: { session_id, message_id, message, history }
-  │
-  ▼
-Backend: chat.py → _stream_reply()
-  │
-  ├─ 1. Store user message via Storage protocol (InMemory or Cosmos DB)
-  │
-  ├─ 2. Check _foundry_available()
-  │     │
-  │     ├─ YES (credentials configured):
-  │     │   ├─ Load agent spec from agents/chat-agent.yaml (agentkit)
-  │     │   ├─ Create ToolRegistry + register tools (@registry.register)
-  │     │   ├─ AgentManager.temporary_agent() → create ephemeral agent
-  │     │   ├─ Create thread + add user message via agents_client
-  │     │   ├─ run_agent_stream() → yield AgentStreamEvent objects
-  │     │   └─ Map events to SSE: delta tokens
-  │     │
-  │     └─ NO (local/simulation mode):
-  │         ├─ Load system prompt from prompts/system.md
-  │         ├─ Call summarize_text tool directly
-  │         └─ Split reply into tokens for SSE streaming
-  │
-  ├─ 3. Emit SSE events:
-  │     ├─ event: message_start  →  { session_id, message_id }
-  │     ├─ event: delta          →  { token }  (repeated per token)
-  │     ├─ event: tool_event     →  { tool, status }
-  │     └─ event: done           →  { ok: true }
-  │
-  ├─ 4. Store assistant message via Storage protocol
-  │
-  └─ 5. Log completion via structlog
-  │
-  ▼
-Frontend: streamChat() in lib/api.ts
-  │
-  ├─ Parse SSE stream (split on \n\n boundaries)
-  ├─ delta events → append tokens to assistant message (useStreamingChat hook)
-  ├─ tool_event → update ToolEvent state → render ToolCard component
-  └─ done → mark loading complete
+BigQuery ─► Container App Job (Python, async) ─► Cosmos DB (NoSQL)
+                       │
+                       └─► Log Analytics + App Insights
 ```
 
-## Library Architecture
+## How a run works
+
+1. Read watermarks for each pipeline from `sync_metadata`.
+2. For each pipeline:
+   - `build_query()` returns the SQL (joins + aggregates live here).
+   - Page rows via `google-cloud-bigquery`, wrapped in `asyncio.to_thread`.
+   - `row_to_document()` projects each row into a Cosmos doc with id
+     `<entity>::<source-pk>`.
+   - `BatchWriter` upserts with bounded concurrency. Throttle responses
+     retry with exponential backoff and respect `x-ms-retry-after-ms`.
+   - Bad rows are isolated; the rest of the pipeline keeps going.
+3. Write a `sync_metadata` summary doc with status, counts, watermark, and
+   `run_id`. Watermark advances only to the last persisted row's timestamp.
+4. Exit non-zero if any pipeline ended `failure`.
+
+## Pipelines
+
+Pipelines are stateless classes implementing a small protocol. The runner owns
+batching, retries, error isolation, telemetry, and checkpointing so the
+pipeline file is just SQL + projection.
 
 ```
-┌─────────────────────────────┐
-│  py/apps/app-template       │  ← Domain logic, routes, tools
-│  ├── api/v1/chat.py         │
-│  ├── tools/sample_tools.py  │
-│  ├── agents/chat-agent.yaml │
-│  └── services/storage.py    │
-└────────┬────────────────────┘
-         │ imports
-    ┌────┴────┐
-    │         │
-┌───▼───┐ ┌──▼──────┐
-│agentkit│ │foundrykit│  ← Reusable libraries
-│       │ │         │
-│AgentSp│ │Foundry  │
-│ec     │ │Client   │
-│       │ │Agent    │
-│load_  │ │Manager  │
-│agent_ │ │Tool     │
-│spec() │ │Registry │
-└───────┘ └─────────┘
+build_query(ctx) -> str         # SQL string, may reference ctx.watermark
+row_to_document(row, *, ctx) -> dict
+extract_watermark(row) -> datetime | None   # default: row["updated_at"]
 ```
 
-**Separation of concerns:**
-- `agentkit` defines **what** an agent is (YAML spec → `AgentSpec`).
-- `foundrykit` handles **how** it runs (credentials, SDK calls, tracing).
-- `app-template` is the **domain layer** (routes, tools, storage, prompts).
+Register a new one in `pipelines/registry.py`. See
+[extending.md](extending.md).
 
-## Storage Architecture
+## Why these choices
 
-```
-Storage Protocol (typing.Protocol)
-  ├── add_message(StoredMessage) → StoredMessage
-  └── list_messages(session_id) → list[StoredMessage]
+- **Joins in BigQuery.** Columnar scan + `ARRAY_AGG(... LIMIT N)` for bounded
+  embeds. Python stays a shipping layer. Cheaper than pulling N tables and
+  joining in-memory once volumes grow.
+- **Cosmos for NoSQL.** Point reads by partition key are the dominant access
+  pattern; documents are denormalized so a serving query is one round-trip.
+- **Container App Job, not Functions.** Job runs are minutes-long batches,
+  not seconds. Scale-to-zero, managed identity, azd-native.
+- **One row → one document.** Deterministic ids → re-runs are idempotent.
+  No tombstones unless you need hard deletes; filter `deleted_at` in
+  `build_query` and add a tombstone pipeline if so.
 
-Implementations:
-  ├── InMemoryStorage      ← Local dev (default)
-  └── CosmosStorage        ← Production (STORAGE_MODE=cosmos)
+## Failure model
 
-Factory: get_storage() selects implementation via STORAGE_MODE env var
-Partition key: /session_id (Cosmos DB)
-```
+| Failure | Behaviour |
+| --- | --- |
+| One bad row (projection error) | counted in `rows_failed`, run continues |
+| Cosmos 429 / 449 | retried with backoff, respects retry-after header |
+| BigQuery 429 / quotaExceeded | retried by `bigquerykit.retry_on_rate_limit` |
+| One pipeline fails | next pipeline still runs, job exits non-zero |
+| Partial success | status `partial`, watermark advances to last persisted row |
 
-## Infrastructure Architecture
+## Scale notes
 
-```
-Azure Resource Group
-  ├── Container App Environment
-  │   ├── Backend Container App (FastAPI)
-  │   └── Frontend Container App (React/nginx)
-  ├── Cosmos DB Account (Session consistency)
-  │   └── SQL Database
-  │       ├── messages container (partition: /session_id)
-  │       └── sessions container (partition: /session_id)
-  ├── Log Analytics Workspace
-  └── Application Insights
-```
+Sized for ~500 MB/day. Headroom paths when that grows:
 
-Deployed via `azd provision` (Terraform) + `azd deploy` (container builds).
+- **More throughput** — bump per-container Cosmos RU/s, raise
+  `BATCH_WRITER_CONCURRENCY`.
+- **More pipelines** — run them in parallel by raising `SYNC_PARALLELISM`
+  (semaphore in the runner). BQ slot quota is usually the next bottleneck.
+- **Bigger pages** — raise `BQ_PAGE_SIZE`; memory grows linearly with page
+  size × concurrency.
+- **Beyond batch** — keep the pipeline classes, swap the cron for a Pub/Sub
+  → Event Hubs bridge for sub-minute latency.

@@ -1,25 +1,16 @@
 [project]
-name = "template-agentic-ai-apps-azure-py"
+name = "bigquery-cosmos-sync-workspace"
 version = "0.1.0"
-description = "Python workspace for the agentic Azure app template"
-requires-python = ">=3.11"
-
+description = "Workspace for the BigQuery -> Cosmos DB sync job"
+requires-python = "==3.12.*"
 dependencies = []
 
 [tool.uv.workspace]
 members = [
-  "apps/app-template",
-  "apps/sample-eval-e2e",
-  "libs/foundrykit",
-  "libs/agentkit",
-  "libs/evalkit",
-  "libs/synthetickit",
-  "libs/testkit",
-  "mcp/mcp-server-template",
+    "apps/bq-cosmos-sync",
+    "libs/bigquerykit",
+    "libs/cosmosdbkit",
 ]
-
-[tool.pytest.ini_options]
-asyncio_mode = "auto"
 
 [tool.uv]
 package = false

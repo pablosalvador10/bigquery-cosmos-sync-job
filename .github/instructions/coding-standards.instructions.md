@@ -1,62 +1,67 @@
 ---
-description: Coding standards for Python, FastAPI, SSE streaming, TypeScript UI, and Terraform in this template repo.
-applyTo: '**'
+applyTo: "py/**/*.py"
 ---
+# Python coding standards (repo-specific)
 
-# Coding Standards
+The general FDE rules live in `py_bestpractice.instructions.md`,
+`py_models.instructions.md`, and `py_testing.instructions.md`. Read those
+first. This file only captures the patterns that are specific to *this*
+repo (BigQuery → Cosmos sync) and that aren't already covered by the
+platform instructions.
 
-## General
-- Keep code simple, typed, and readable.
-- Reuse existing modules before creating new ones.
-- Keep edits minimal and scoped to the task.
-- Never commit secrets, credentials, or keys.
-- Add module-level and public API docstrings in Python.
+## What the house rules already cover (don't restate, just follow)
 
-## Python / FastAPI
-- Use `async` handlers and non-blocking I/O for API paths.
-- Validate request/response with Pydantic models.
-- Keep route handlers thin; move reusable logic to services/libs.
-- Use structured logging and tracing hooks from `core/`.
-- Use `pydantic-settings` for configuration, not direct `os.environ` reads.
-- Prefer protocol-first abstractions (`typing.Protocol`) for replaceable backends.
-- Keep Azure clients singleton-like and reused per process where possible.
-- Avoid blocking SDK calls in event loop; use executor when needed.
+- No `from __future__ import annotations`.
+- No `__all__` — use redundant-alias re-exports (`from x import Y as Y`).
+- No `print()` in app code — use `typer.echo(..., err=True)` or `log_event`.
+- Pydantic `FrozenBaseModel` for value objects; pydantic `BaseModel` for
+  domain models that are mutated in flight.
+- Modern type syntax (`list[str]`, `X | None`); no `from typing import List`.
+- One-line module + class + public-function docstring (PEP 257), no AI
+  filler.
+- `pytest-asyncio` with `asyncio_mode = "auto"`.
 
-## SSE Contract
-- Preserve these event names exactly:
-  - `message_start`
-  - `delta`
-  - `tool_event`
-  - `done`
-- Emit JSON payloads for each event.
-- Keep frontend parser and backend emitter in sync.
+## Repo-specific exceptions
 
-## TypeScript / React
-- Keep state logic in hooks and UI in components.
-- Use explicit types for API payloads and stream events.
-- Avoid hidden coupling to backend internals.
-- Keep mobile-safe layouts and clear UX states (loading/error/empty).
+These are the only places we deliberately break the "no mutable container"
+rule, and the reason is recorded here so reviewers don't have to ask:
 
-## Infrastructure
-- Prefer variable-driven Terraform modules.
-- Do not hardcode tenant/subscription/resource IDs.
-- Keep outputs aligned with runtime configuration and docs.
+- `BatchWriteResult` (`cosmos/writer.py`) — internal accumulator merged
+  across concurrent upsert tasks. A frozen model would force a copy on
+  every row.
+- `QueryBuilder` (`bigquerykit`, `cosmosdbkit`) — fluent builder; `.bind()`
+  mutates and returns `self`.
+- `PipelineSummary` / `RunSummary` (`models.py`) — accumulated by the
+  runner as a pipeline progresses, then logged at the end.
 
-## Dependencies
-- Do not add new dependencies without explicit approval.
-- If required, add only at the package scope you modify.
+Everything else that holds a configuration snapshot (e.g. `PipelineContext`,
+`Settings`) is a frozen pydantic model.
 
-## Testing and Verification
-- Add or update tests for behavior changes.
-- Validate API, SSE, and parsing behavior together.
-- Run lint/validate checks before completion.
-- Use clear arrange/act/assert tests that encode behavior, not internals.
-- Prefer in-memory fakes over brittle deep mocks for infrastructure boundaries.
+## Repo-specific patterns
 
-## Anti-Patterns
-- No unnecessary wrapper/facade/manager layers.
-- No broad refactors for a narrow fix.
-- No duplicate utility logic when a shared module exists.
-- No silent `except Exception: pass`.
-- No `print()` in app/library runtime paths.
-- No direct library-to-app coupling across template boundaries.
+### BigQuery paging
+The sync wraps the sync BQ SDK with `asyncio.to_thread`. There's a known
+asyncio bug where `StopIteration` raised inside `to_thread` becomes
+`RuntimeError`. Use `_next_page(pages, sentinel)` in
+`bigquerykit/dataset.py` — not `try / except StopIteration`.
+
+### Cosmos batching
+Always use `BatchWriter`. Don't call `upsert_item` in a loop — that's an
+HTTP round-trip per row and you'll burn RUs.
+
+### Watermark extraction
+`Pipeline.extract_watermark` reads `updated_at` by default. Override it
+if your pipeline projects a different column (the `learners` pipeline
+does this for `effective_updated_at`).
+
+### Structured logging
+`log_event(logger, event, /, *, level=..., **fields)` from
+`bq_cosmos_sync.logging`. First positional arg is a snake_case event name;
+extra kwargs become JSON fields. No f-strings in log calls.
+
+### Tests
+- Fakes go in `tests/fakes.py` and implement the same protocol the real
+  client does. No `MagicMock` for types we own.
+- Sleep stubs use `async def _no_sleep(_: float) -> None: return None` —
+  never a lambda that calls `asyncio.sleep(0)`, which recurses through
+  the patched sleep.

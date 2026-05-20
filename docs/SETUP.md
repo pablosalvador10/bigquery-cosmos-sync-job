@@ -1,69 +1,106 @@
-# Setup
+# setup
 
-## Prerequisites
-- Python 3.11+
-- Node 20+
-- [`uv`](https://docs.astral.sh/uv/) (Python workspace manager)
-- [`pnpm`](https://pnpm.io/) (Node package manager)
-- Docker (optional, for local E2E)
-- Terraform + Azure CLI + azd (for cloud deploy)
+Local dev loop. Install deps, seed BigQuery, point the sync at the emulator
+or a real account.
 
-## Backend
+## Prereqs
+
+Python 3.12, [uv](https://docs.astral.sh/uv/), Docker, Terraform ≥ 1.6,
+[azd](https://learn.microsoft.com/azure/developer/azure-developer-cli/),
+`gcloud`, `az`.
+
+## Install
 
 ```bash
-cd py
-uv sync --all-packages          # Install all workspace packages + dev deps
-uv run uvicorn --app-dir apps/app-template main:app --reload --port 8001
+uv sync --project py/apps/bq-cosmos-sync
 ```
 
-## Run Tests
+Resolves the whole workspace (app + both kits) in one go.
+
+## Configure
 
 ```bash
-cd py
-uv run pytest libs/ apps/app-template/tests/ apps/sample-eval-e2e/tests/ -v
+cp .env.example .env
+$EDITOR .env
 ```
 
-## Frontend
+| var | purpose |
+| --- | --- |
+| `BQ_PROJECT_ID` | GCP project |
+| `BQ_DATASET` | default `learnsphere` |
+| `BQ_LOCATION` | default `US` |
+| `GOOGLE_APPLICATION_CREDENTIALS` | path to GCP SA JSON; mounted at `/secrets/gcp-sa-json` in the image |
+| `COSMOS_ENDPOINT` | account URL, or `https://localhost:8081/` for the emulator |
+| `COSMOS_KEY` | set for the emulator; unset in Azure (managed identity) |
+| `COSMOS_DATABASE` | default `learnsphere` |
+| `SYNC_PIPELINES` | comma-separated, default `courses,learners,recommendations` |
+
+## GCP service account
 
 ```bash
-cd ts
-pnpm install
-pnpm --filter ui-copilot-template dev
+gcloud iam service-accounts create bq-cosmos-sync-reader \
+  --display-name "BQ → Cosmos sync reader"
+
+for role in roles/bigquery.dataViewer roles/bigquery.jobUser; do
+  gcloud projects add-iam-policy-binding "$BQ_PROJECT_ID" \
+    --member "serviceAccount:bq-cosmos-sync-reader@${BQ_PROJECT_ID}.iam.gserviceaccount.com" \
+    --role "$role"
+done
+
+gcloud iam service-accounts keys create ./secrets/gcp-sa.json \
+  --iam-account "bq-cosmos-sync-reader@${BQ_PROJECT_ID}.iam.gserviceaccount.com"
 ```
 
-## Local E2E (Docker)
+`secrets/` is gitignored.
+
+## Seed BigQuery
 
 ```bash
-cp .env.example .env             # Only needed on first run
+uv sync --project py/apps/bq-cosmos-sync --group notebooks
+uv run --project py/apps/bq-cosmos-sync jupyter lab notebooks/
+```
+
+Run in order:
+
+1. `bigquery/01_setup_dataset.ipynb`
+2. `bigquery/02_seed_data.ipynb`
+3. `bigquery/03_validate.ipynb`
+
+## Run
+
+Against the emulator:
+
+```bash
 docker compose up --build
 ```
 
-Backend: http://localhost:8001 | Frontend: http://localhost:5173
-
-## Validate Everything
+Against a real account:
 
 ```bash
-# Backend health
-curl http://localhost:8001/healthz
-
-# All Python tests (libs + apps)
-cd py && uv run pytest libs/ apps/ -v
-
-# Frontend lint + typecheck + tests + build
-cd ts && pnpm --filter ui-copilot-template lint && \
-  pnpm --filter ui-copilot-template typecheck && \
-  pnpm --filter ui-copilot-template test && \
-  pnpm --filter ui-copilot-template build
-
-# Infrastructure validation
-cd infra && terraform init -backend=false && terraform validate && terraform fmt -check -recursive
+uv run --project py/apps/bq-cosmos-sync bq-cosmos-sync run
 ```
 
-## Cloud Deployment
+CLI:
 
 ```bash
-cp .env.azure.example .env.azure   # Fill in real values
-cp infra/main.tfvars.example infra/main.tfvars  # Set subscription, region
-azd provision
-azd deploy
+bq-cosmos-sync run --help
+bq-cosmos-sync run --pipeline learners --dry-run
+bq-cosmos-sync run --pipeline courses --max-rows 100
+```
+
+## Validate
+
+```bash
+uv run --project py/apps/bq-cosmos-sync jupyter lab notebooks/
+# cosmosdb/01_inspect_containers.ipynb
+# cosmosdb/02_sync_metadata.ipynb
+```
+
+Or with az:
+
+```bash
+az cosmosdb sql query \
+  --account-name <acc> --database-name learnsphere \
+  --container-name sync_metadata \
+  --query-text "SELECT TOP 5 * FROM c ORDER BY c.finished_at DESC"
 ```

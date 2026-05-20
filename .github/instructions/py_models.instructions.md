@@ -1,42 +1,97 @@
 ---
-description: Pydantic modeling conventions for Python apps and libraries in this template.
-applyTo: '**/py/**'
+applyTo: "**/py/**"
 ---
 
-# Python Models (Pydantic)
+# Pydantic model conventions
 
-## Purpose
-Use Pydantic models as the default contract type for API payloads, domain entities, tool inputs/outputs, and persisted documents.
+## Overview
 
-## Core Rules
-- Prefer `BaseModel` for structured data; avoid ad-hoc dict contracts.
-- Add explicit field types and defaults; avoid implicit optional behavior.
-- Use `Field(...)` for constraints (length, patterns, bounds) where applicable.
-- Keep model names domain-meaningful (`ChatRequest`, `StoredMessage`, etc.).
-- Add concise docstrings for public models that capture intent and constraints.
+Prefer a project-local `FrozenBaseModel` — a Pydantic `BaseModel` with `frozen=True` — as the base class for value objects and domain models. Frozen models are immutable after construction, which prevents accidental mutation and keeps data flow easy to reason about.
 
-## Nullability
-- Use `x: str` for required non-null values.
-- Use `x: str | None` for required nullable values.
-- Use `x: str | None = None` for optional nullable values.
-- Do not use empty strings, zero, or `False` as missing-value sentinels when `None` is the intended state.
+```python
+from pydantic import BaseModel, ConfigDict
 
-## API Model Boundaries
-- Keep API request/response models separate from persistence/internal models when concerns diverge.
-- Do not leak internal-only fields (partition keys, diagnostics, private metadata) to API responses.
-- Convert at boundaries (service -> API model), not deep inside infrastructure code.
 
-## Persistence Models
-- For Cosmos documents, include stable identifiers and partition key fields explicitly.
-- Keep timestamp fields ISO-8601 UTC strings or strongly typed datetime fields with clear serialization behavior.
-- Prefer additive schema evolution to avoid breaking existing persisted records.
+class FrozenBaseModel(BaseModel):
+    model_config = ConfigDict(frozen=True)
+```
 
-## Validation And Serialization
-- Use model validation methods to normalize/validate external inputs.
-- Keep JSON payload contracts stable and explicit when used by frontend or tools.
-- Avoid custom serialization unless required; document any non-default behavior.
+Drop this in a shared `models/base.py` module per app or library and import from there.
 
-## Anti-Patterns
-- No giant “kitchen sink” models with mixed responsibilities.
-- No untyped `dict`/`Any` payloads where a model contract is feasible.
-- No business logic in models beyond lightweight validation/normalization.
+## Usage
+
+### `FrozenBaseModel`
+
+```python
+from app.models.base import FrozenBaseModel
+
+class User(FrozenBaseModel):
+    name: str
+    age: int
+    email: str | None = None
+
+# Create a user instance
+user = User(name="Alice", age=30, email="alice@example.com")
+
+# This works fine
+print(user.name)  # "Alice"
+print(user.age)   # 30
+
+# This will raise a ValidationError because the model is frozen
+try:
+    user.name = "Bob"  # ❌ ValidationError: Instance is frozen
+except ValidationError as e:
+    print(f"Error: {e}")
+```
+
+### `model_config` Inheritance
+
+If a child class inheriting from `FrozenBaseModel` also specifies a `model_config`, the config from the child class will be _merged_ with the parent's:
+
+```py
+from pydantic import BaseModel
+from pydantic import ConfigDict
+
+
+class FrozenBaseModel(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+
+class Child(FrozenBaseModel):
+    model_config = ConfigDict(str_to_lower=True)
+
+    x: str
+
+
+child = Child(x='FOO')
+print(child.model_dump())
+#> {'x': 'foo'}
+print(child.model_config)
+#> {'frozen': True, 'str_to_lower': True}
+```
+
+## `dict_adapter` decorator
+
+A `dict_adapter` decorator pattern is useful for converting dictionary inputs into Pydantic model instances automatically. This keeps function signatures strongly typed when integrating with third-party libraries or frameworks that pass dictionaries (e.g., serverless function bindings, dynamic providers, event handlers).
+
+```python
+from app.models.base import FrozenBaseModel
+from app.models.dict_adapter import dict_adapter
+
+class InputModel(FrozenBaseModel):
+    x: float
+    y: float
+
+class OutputModel(FrozenBaseModel):
+    sum: float
+    product: float
+
+@dict_adapter
+def compute(input_model: InputModel) -> OutputModel:
+    return OutputModel(
+        sum=input_model.x + input_model.y,
+        product=input_model.x * input_model.y
+    )
+
+assert compute({"x": 3.0, "y": 4.0}) == {"sum": 7.0, "product": 12.0}
+```

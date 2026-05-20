@@ -19,6 +19,12 @@ variable "log_analytics_workspace_id" {
   type        = string
 }
 
+variable "infrastructure_subnet_id" {
+  description = "Subnet ID for vnet-integrated CAE (must be delegated to Microsoft.App/environments). Null for non-vnet CAE."
+  type        = string
+  default     = null
+}
+
 variable "tags" {
   description = "Resource tags"
   type        = map(string)
@@ -31,6 +37,7 @@ resource "azurerm_container_app_environment" "this" {
   location                   = var.location
   resource_group_name        = var.resource_group_name
   log_analytics_workspace_id = var.log_analytics_workspace_id
+  infrastructure_subnet_id   = var.infrastructure_subnet_id
   tags                       = var.tags
 }
 

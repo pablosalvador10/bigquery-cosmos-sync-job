@@ -226,3 +226,32 @@ override.tf.json
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# ─── bigquery-cosmos-sync-job ──────────────────────────────────────
+# Secrets / local config
+.env
+.env.local
+.env.azure
+.secrets/
+secrets/
+*.pem
+*-sa.json
+gcp-sa*.json
+
+# Terraform
+**/.terraform/
+**/.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+*.tfvars
+!**/*.tfvars.example
+crash.log
+crash.*.log
+
+# azd
+.azure/
+
+# OS / IDE
+.DS_Store

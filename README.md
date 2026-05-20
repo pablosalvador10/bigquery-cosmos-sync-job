@@ -1,91 +1,78 @@
-# Template Agentic AI Apps on Azure
+# bigquery-cosmos-sync-job
 
-Reusable full-stack foundation for building autonomous agent applications with:
+Daily BigQuery → Cosmos DB (NoSQL) sync, packaged as an Azure Container App
+Job. Cron-triggered, scale-to-zero, idempotent.
 
-- Python backend (`FastAPI`) with sync and SSE chat endpoints
-- Reusable internal libs (`foundrykit`, `agentkit`)
-- React chat UI template with streaming rendering
-- MCP server skeleton for tool microservices
-- Terraform + `azd` deployment baseline
-
-## Monorepo Layout
-
-- `py/apps/app-template`: Backend sample app (domain-neutral)
-- `py/apps/sample-eval-e2e`: End-to-end sample (synthetickit + evalkit)
-- `py/libs/foundrykit`: Foundry client/agent/tool abstractions
-- `py/libs/agentkit`: YAML-driven agent spec loader
-- `py/libs/evalkit`: Domain-agnostic evaluation framework
-- `py/libs/synthetickit`: Synthetic data generation pipeline
-- `py/libs/testkit`: Shared test fakes and utilities
-- `py/mcp/mcp-server-template`: Generic MCP server starter
-- `ts/apps/ui-copilot-template`: Streaming chat frontend template
-- `infra/`: Terraform modules and environment scaffold
-- `docs/`: Architecture, setup, API, troubleshooting
-
-## Quick Start
-
-### 1. Backend
-
-```bash
-cd py
-uv sync --all-packages
-uv run uvicorn --app-dir apps/app-template main:app --reload --port 8001
+```
+BigQuery ─► Container App Job (Python, async) ─► Cosmos DB (NoSQL)
+                       │
+                       └─► Log Analytics + App Insights
 ```
 
-### 2. Frontend
+Use it when BigQuery holds the analytical truth and Cosmos is the serving
+layer for an app — chat memory, recommendations, point lookups.
+
+## Layout
+
+| path | what |
+| --- | --- |
+| [py/apps/bq-cosmos-sync](py/apps/bq-cosmos-sync) | the job: Python 3.12, async, pluggable pipelines |
+| [py/libs/bigquerykit](py/libs/bigquerykit) | async BigQuery I/O kit |
+| [py/libs/cosmosdbkit](py/libs/cosmosdbkit) | async Cosmos DB I/O kit |
+| [infra](infra) | Terraform (Container App Job, Cosmos, Key Vault, Log Analytics, App Insights, alerts) |
+| [notebooks](notebooks) | LearnSphere sample: seed BQ, validate, inspect Cosmos |
+| [docs](docs) | architecture, decisions, setup, deploy, observability, runbook |
+
+Sample domain is **LearnSphere**: five normalized BigQuery tables
+(`learners`, `instructors`, `courses`, `enrollments`, `course_reviews`)
+joined in SQL into three denormalized Cosmos containers (`courses`,
+`learners`, `recommendations`). Joins and aggregations live in SQL; Python
+projects rows into documents. Swap the domain by replacing the pipelines.
+
+## Quick start
 
 ```bash
-cd ts
-pnpm install
-pnpm --filter ui-copilot-template dev
+uv sync --project py/apps/bq-cosmos-sync          # install
+cp .env.example .env && $EDITOR .env              # configure
+uv run --project py/apps/bq-cosmos-sync jupyter lab notebooks/  # seed BQ
+docker compose up --build                         # run vs. Cosmos emulator
+azd up                                            # deploy to Azure
 ```
 
-### 3. Run Tests
+Full walk-through: [docs/setup.md](docs/setup.md).
+Deploy: [docs/deployment.md](docs/deployment.md).
 
-```bash
-cd py && uv run pytest libs/ apps/ -v
-```
+## Pipelines
 
-### 4. Local End-to-End (Docker)
+`Pipeline` is a small protocol (`build_query`, `row_to_document`, optional
+`extract_watermark`). The runner owns batching, retries, error isolation,
+telemetry, and checkpoints — the pipeline file is just SQL + projection.
 
-```bash
-cp .env.example .env
-docker compose up --build
-```
+| pipeline | refresh | BQ source | container | PK |
+| --- | --- | --- | --- | --- |
+| `courses` | full | `courses ⨝ instructors ⨝ agg(course_reviews)` | `courses` | `/category` |
+| `learners` | incremental on `effective_updated_at` | `learners ⨝ agg(enrollments ⨝ courses)` | `learners` | `/country` |
+| `recommendations` | full | derived from `enrollments + courses` | `recommendations` | `/learnerId` |
 
-## Streaming Contract
+`effective_updated_at = GREATEST(learners.updated_at, MAX(enrollments.last_activity_at))`
+so a learner re-syncs on enrollment activity, not just profile edits.
 
-Backend SSE endpoint emits these events in order:
+Schemas, embeds, and PK rationale: [docs/data-model.md](docs/data-model.md).
+Architecture and failure model: [docs/architecture.md](docs/architecture.md).
+Adding a pipeline: [docs/extending.md](docs/extending.md).
 
-1. `message_start`
-2. `delta`
-3. `tool_event`
-4. `done`
+## Observability
 
-## Extend the Template
+- structured JSON logs → Log Analytics (`ContainerAppConsoleLogs_CL`)
+- OpenTelemetry traces → App Insights (when `APPLICATIONINSIGHTS_CONNECTION_STRING` is set)
+- one summary doc per (run, pipeline) in the `sync_metadata` Cosmos container
+- five provisioned alerts: job failed, partial failure, missing daily success,
+  abnormal row volume, sustained Cosmos 429 throttling
 
-1. Add your domain models under `py/apps/app-template/models/`.
-2. Add tool functions under `py/apps/app-template/tools/` and register through `foundrykit.ToolRegistry`.
-3. Add MCP tools in `py/mcp/mcp-server-template/tools/`.
-4. Replace the sample prompt in `py/apps/app-template/prompts/system.md`.
-5. Update Terraform variables in `infra/main.tfvars.example`.
+KQL queries, alert thresholds, and "healthy looks like":
+[docs/observability.md](docs/observability.md).
+When things break: [docs/troubleshooting.md](docs/troubleshooting.md).
 
-## Deployment
+## License
 
-This template uses Terraform through Azure Developer CLI.
-
-```bash
-azd provision
-azd deploy
-```
-
-Use `.env.example` for local development and `.env.azure.example` for cloud settings.
-
-## CI Quality Gates
-
-This repo includes a strict CI workflow at `.github/workflows/ci.yml`.
-
-- Backend: Python lint (`ruff`) + tests (`pytest`)
-- Frontend: lint + typecheck + tests + build
-
-To prevent merging code with failing checks, configure branch protection on `main` and require the `CI` workflow status check to pass.
+[MIT](LICENSE)

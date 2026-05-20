@@ -1,23 +1,16 @@
-name: template-agentic-ai-apps-azure
+# yaml-language-server: $schema=https://raw.githubusercontent.com/Azure/azure-dev/main/schemas/v1.0/azure.yaml.json
+name: bigquery-cosmos-sync-job
 metadata:
-  template: template-agentic-ai-apps-azure@0.1.0
+  template: bigquery-cosmos-sync-job@0.1.0
 services:
-  backend:
-    project: py/apps/app-template
+  sync:
+    project: py/apps/bq-cosmos-sync
     language: py
     host: containerapp
     docker:
       path: Dockerfile
-  frontend:
-    project: ts/apps/ui-copilot-template
-    language: js
-    host: containerapp
-    docker:
-      path: Dockerfile
+      context: ../../..
+      remoteBuild: true
 infra:
   provider: terraform
   path: infra
-hooks:
-  postprovision:
-    shell: sh
-    run: ./infra/scripts/postprovision.sh

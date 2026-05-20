@@ -22,11 +22,23 @@ variable "database_name" {
 variable "containers" {
   description = "List of containers to create"
   type = list(object({
-    name               = string
-    partition_key_path = string
-    throughput         = optional(number)
+    name                     = string
+    partition_key_path       = string
+    throughput               = optional(number)
+    autoscale_max_throughput = optional(number)
   }))
   default = []
+}
+
+variable "capacity_mode" {
+  description = "How throughput is provisioned: 'serverless' or 'autoscale'."
+  type        = string
+  default     = "serverless"
+
+  validation {
+    condition     = contains(["serverless", "autoscale"], var.capacity_mode)
+    error_message = "capacity_mode must be 'serverless' or 'autoscale'."
+  }
 }
 
 variable "role_assignment_principal_ids" {
@@ -41,14 +53,28 @@ variable "tags" {
   default     = {}
 }
 
+variable "public_network_access_enabled" {
+  description = "If false, the Cosmos account only accepts traffic from private endpoints"
+  type        = bool
+  default     = true
+}
+
 # --- Resources ---
 resource "azurerm_cosmosdb_account" "this" {
-  name                = var.name
-  location            = var.location
-  resource_group_name = var.resource_group_name
-  offer_type          = "Standard"
-  kind                = "GlobalDocumentDB"
-  tags                = var.tags
+  name                          = var.name
+  location                      = var.location
+  resource_group_name           = var.resource_group_name
+  offer_type                    = "Standard"
+  kind                          = "GlobalDocumentDB"
+  public_network_access_enabled = var.public_network_access_enabled
+  tags                          = var.tags
+
+  dynamic "capabilities" {
+    for_each = var.capacity_mode == "serverless" ? [1] : []
+    content {
+      name = "EnableServerless"
+    }
+  }
 
   consistency_policy {
     consistency_level = "Session"
@@ -57,6 +83,7 @@ resource "azurerm_cosmosdb_account" "this" {
   geo_location {
     location          = var.location
     failover_priority = 0
+    zone_redundant    = false
   }
 }
 
@@ -73,7 +100,13 @@ resource "azurerm_cosmosdb_sql_container" "this" {
   account_name        = azurerm_cosmosdb_account.this.name
   database_name       = azurerm_cosmosdb_sql_database.this.name
   partition_key_paths = [var.containers[count.index].partition_key_path]
-  throughput          = var.containers[count.index].throughput
+
+  dynamic "autoscale_settings" {
+    for_each = var.capacity_mode == "autoscale" ? [1] : []
+    content {
+      max_throughput = coalesce(var.containers[count.index].autoscale_max_throughput, 1000)
+    }
+  }
 }
 
 # Data-plane RBAC: custom role + assignment
