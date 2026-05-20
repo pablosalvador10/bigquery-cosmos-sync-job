@@ -90,8 +90,8 @@ async def _run_async(
         return EXIT_CONFIG_ERROR
 
     cosmos_kwargs: dict[str, object] = {}
-    if settings.cosmos_auth_mode == "key":
-        cosmos_kwargs["key"] = settings.cosmos_key
+    if settings.cosmos_emulator_key:
+        cosmos_kwargs["key"] = settings.cosmos_emulator_key
 
     cosmos = CosmosKitClient(endpoint=settings.cosmos_endpoint, **cosmos_kwargs)  # type: ignore[arg-type]
     bq = BigQueryKitClient(project=settings.bq_project_id, location=settings.bq_location)

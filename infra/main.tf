@@ -125,11 +125,14 @@ module "appinsights" {
 # ---------------------------------------------------------------------------
 
 module "acr" {
-  source              = "./modules/container-registry"
-  name                = local.names.acr
-  resource_group_name = data.azurerm_resource_group.this.name
-  location            = data.azurerm_resource_group.this.location
-  tags                = local.tags
+  source                        = "./modules/container-registry"
+  name                          = local.names.acr
+  resource_group_name           = data.azurerm_resource_group.this.name
+  location                      = data.azurerm_resource_group.this.location
+  sku                           = var.acr_sku
+  admin_enabled                 = false
+  public_network_access_enabled = var.acr_public_network_access_enabled
+  tags                          = local.tags
 
   pull_identity_principal_ids = [
     azurerm_user_assigned_identity.sync.principal_id,
@@ -139,10 +142,13 @@ module "acr" {
 # ---------------------------------------------------------------------------
 # Virtual Network — vnet-integrated Container Apps + private endpoints
 #
-# FDE policy 'pna-development-{cosmos,kv}' denies Cosmos & Key Vault accounts
-# with publicNetworkAccess=Enabled. To stay compliant we run them behind
-# private endpoints in this vnet, with the Container Apps Environment
-# vnet-integrated into snet-cae so the sync job can reach them.
+# Production-grade deployments should never expose Cosmos DB or Key Vault on
+# their public endpoints. This sample bakes in the secure-by-default layout:
+# Cosmos and Key Vault are reached only through Private Endpoints, the
+# Container Apps Environment is vnet-integrated into snet-cae, and outbound
+# traffic to BigQuery / GCS exits through a NAT Gateway with a deterministic
+# public IP that the BigQuery side can put on its allow-list (or inside a
+# VPC Service Controls perimeter). See docs/networking.md for the full picture.
 # ---------------------------------------------------------------------------
 
 resource "azurerm_virtual_network" "this" {
@@ -188,6 +194,12 @@ resource "azurerm_private_dns_zone" "kv" {
   tags                = local.tags
 }
 
+resource "azurerm_private_dns_zone" "acr" {
+  name                = "privatelink.azurecr.io"
+  resource_group_name = data.azurerm_resource_group.this.name
+  tags                = local.tags
+}
+
 resource "azurerm_private_dns_zone_virtual_network_link" "cosmos" {
   name                  = "link-cosmos"
   resource_group_name   = data.azurerm_resource_group.this.name
@@ -202,6 +214,151 @@ resource "azurerm_private_dns_zone_virtual_network_link" "kv" {
   private_dns_zone_name = azurerm_private_dns_zone.kv.name
   virtual_network_id    = azurerm_virtual_network.this.id
   tags                  = local.tags
+}
+
+resource "azurerm_private_dns_zone_virtual_network_link" "acr" {
+  name                  = "link-acr"
+  resource_group_name   = data.azurerm_resource_group.this.name
+  private_dns_zone_name = azurerm_private_dns_zone.acr.name
+  virtual_network_id    = azurerm_virtual_network.this.id
+  tags                  = local.tags
+}
+
+# ---------------------------------------------------------------------------
+# NAT Gateway — deterministic egress for BigQuery / GCS
+#
+# Without a NAT Gateway, outbound calls from the CAE leave through whatever
+# ephemeral SNAT IP Azure picks, which makes it impossible to allow-list the
+# pipeline on the GCP side (VPC Service Controls perimeter, BigQuery network
+# allow-list, etc.). With a NAT Gateway, every outbound call uses a stable
+# public IP that the BigQuery owner can pin. The egress IP is published as
+# the `nat_gateway_egress_ip` output. See docs/networking.md.
+# ---------------------------------------------------------------------------
+
+resource "azurerm_public_ip" "nat" {
+  name                = "pip-nat-${var.environment_name}"
+  resource_group_name = data.azurerm_resource_group.this.name
+  location            = data.azurerm_resource_group.this.location
+  allocation_method   = "Static"
+  sku                 = "Standard"
+  zones               = ["1", "2", "3"]
+  tags                = local.tags
+}
+
+resource "azurerm_nat_gateway" "this" {
+  name                    = "natgw-${var.environment_name}"
+  resource_group_name     = data.azurerm_resource_group.this.name
+  location                = data.azurerm_resource_group.this.location
+  sku_name                = "Standard"
+  idle_timeout_in_minutes = 10
+  tags                    = local.tags
+}
+
+resource "azurerm_nat_gateway_public_ip_association" "this" {
+  nat_gateway_id       = azurerm_nat_gateway.this.id
+  public_ip_address_id = azurerm_public_ip.nat.id
+}
+
+resource "azurerm_subnet_nat_gateway_association" "cae" {
+  subnet_id      = azurerm_subnet.cae.id
+  nat_gateway_id = azurerm_nat_gateway.this.id
+}
+
+# ---------------------------------------------------------------------------
+# Network Security Groups
+#
+# snet-cae: deny-by-default outbound, with explicit allows for the Azure
+# control plane (AzureCloud:443) and for HTTPS to the public Internet (the
+# BigQuery API endpoint, which exits through the NAT Gateway above so the
+# source IP is stable). Container Apps platform requirements (MCR, AAD,
+# AzureMonitor, ACR, App Insights) are all reachable inside AzureCloud.
+#
+# snet-pe: only intra-VNet inbound on 443; Private Endpoint NICs accept
+# nothing else. PE health probes from Azure Load Balancer are exempt.
+# ---------------------------------------------------------------------------
+
+resource "azurerm_network_security_group" "cae" {
+  name                = "nsg-cae-${var.environment_name}"
+  resource_group_name = data.azurerm_resource_group.this.name
+  location            = data.azurerm_resource_group.this.location
+  tags                = local.tags
+
+  security_rule {
+    name                       = "AllowHttpsOutboundAzure"
+    priority                   = 100
+    direction                  = "Outbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "443"
+    source_address_prefix      = "*"
+    destination_address_prefix = "AzureCloud"
+  }
+
+  security_rule {
+    name                       = "AllowHttpsOutboundInternet"
+    priority                   = 110
+    direction                  = "Outbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "443"
+    source_address_prefix      = "*"
+    destination_address_prefix = "Internet"
+  }
+
+  security_rule {
+    name                       = "AllowVnetOutbound"
+    priority                   = 120
+    direction                  = "Outbound"
+    access                     = "Allow"
+    protocol                   = "*"
+    source_port_range          = "*"
+    destination_port_range     = "*"
+    source_address_prefix      = "VirtualNetwork"
+    destination_address_prefix = "VirtualNetwork"
+  }
+
+  security_rule {
+    name                       = "DenyAllOutbound"
+    priority                   = 4096
+    direction                  = "Outbound"
+    access                     = "Deny"
+    protocol                   = "*"
+    source_port_range          = "*"
+    destination_port_range     = "*"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
+  }
+}
+
+resource "azurerm_subnet_network_security_group_association" "cae" {
+  subnet_id                 = azurerm_subnet.cae.id
+  network_security_group_id = azurerm_network_security_group.cae.id
+}
+
+resource "azurerm_network_security_group" "pe" {
+  name                = "nsg-pe-${var.environment_name}"
+  resource_group_name = data.azurerm_resource_group.this.name
+  location            = data.azurerm_resource_group.this.location
+  tags                = local.tags
+
+  security_rule {
+    name                       = "AllowHttpsFromVnet"
+    priority                   = 100
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "443"
+    source_address_prefix      = "VirtualNetwork"
+    destination_address_prefix = "*"
+  }
+}
+
+resource "azurerm_subnet_network_security_group_association" "pe" {
+  subnet_id                 = azurerm_subnet.pe.id
+  network_security_group_id = azurerm_network_security_group.pe.id
 }
 
 # ---------------------------------------------------------------------------
@@ -231,6 +388,11 @@ module "cosmos" {
   database_name                 = var.cosmos_database
   capacity_mode                 = var.cosmos_capacity_mode
   public_network_access_enabled = false
+  local_authentication_disabled = true
+  zone_redundant                = var.cosmos_zone_redundant
+  backup_type                   = var.cosmos_backup_type
+  continuous_backup_tier        = var.cosmos_continuous_backup_tier
+  log_analytics_workspace_id    = module.logs.id
   tags                          = local.tags
 
   containers = local.cosmos_containers
@@ -303,6 +465,28 @@ resource "azurerm_private_endpoint" "kv" {
   }
 
   depends_on = [azurerm_private_dns_zone_virtual_network_link.kv]
+}
+
+resource "azurerm_private_endpoint" "acr" {
+  name                = "pe-${local.names.acr}"
+  resource_group_name = data.azurerm_resource_group.this.name
+  location            = data.azurerm_resource_group.this.location
+  subnet_id           = azurerm_subnet.pe.id
+  tags                = local.tags
+
+  private_service_connection {
+    name                           = "psc-acr"
+    private_connection_resource_id = module.acr.id
+    subresource_names              = ["registry"]
+    is_manual_connection           = false
+  }
+
+  private_dns_zone_group {
+    name                 = "acr-dns"
+    private_dns_zone_ids = [azurerm_private_dns_zone.acr.id]
+  }
+
+  depends_on = [azurerm_private_dns_zone_virtual_network_link.acr]
 }
 
 # ---------------------------------------------------------------------------
@@ -449,7 +633,6 @@ module "sync_job" {
     { name = "OTEL_SERVICE_NAME", value = "bq-cosmos-sync" },
     { name = "COSMOS_ENDPOINT", value = module.cosmos.endpoint },
     { name = "COSMOS_DATABASE", value = module.cosmos.database_name },
-    { name = "COSMOS_AUTH_MODE", value = "managed_identity" },
     { name = "BQ_PROJECT_ID", value = var.bq_project_id },
     { name = "BQ_DATASET", value = var.bq_dataset },
     { name = "BQ_LOCATION", value = var.bq_location },

@@ -15,13 +15,24 @@ variable "location" {
 }
 
 variable "sku" {
-  description = "ACR SKU"
+  description = "ACR SKU. Premium is required for Private Endpoints and customer-managed keys."
   type        = string
-  default     = "Basic"
+  default     = "Premium"
+
+  validation {
+    condition     = contains(["Basic", "Standard", "Premium"], var.sku)
+    error_message = "sku must be 'Basic', 'Standard', or 'Premium'."
+  }
 }
 
 variable "admin_enabled" {
-  description = "Enable admin user"
+  description = "Enable admin user. Should be false in production; pull/push happens via Entra ID and managed identity."
+  type        = bool
+  default     = false
+}
+
+variable "public_network_access_enabled" {
+  description = "If false, the registry only accepts traffic from private endpoints and trusted Microsoft services."
   type        = bool
   default     = true
 }
@@ -40,12 +51,13 @@ variable "tags" {
 
 # --- Resources ---
 resource "azurerm_container_registry" "this" {
-  name                = var.name
-  resource_group_name = var.resource_group_name
-  location            = var.location
-  sku                 = var.sku
-  admin_enabled       = var.admin_enabled
-  tags                = var.tags
+  name                          = var.name
+  resource_group_name           = var.resource_group_name
+  location                      = var.location
+  sku                           = var.sku
+  admin_enabled                 = var.admin_enabled
+  public_network_access_enabled = var.public_network_access_enabled
+  tags                          = var.tags
 }
 
 resource "azurerm_role_assignment" "acr_pull" {

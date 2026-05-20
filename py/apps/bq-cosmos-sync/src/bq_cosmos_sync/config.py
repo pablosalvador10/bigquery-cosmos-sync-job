@@ -1,6 +1,6 @@
 """Environment-driven settings."""
 
-from typing import Annotated, Literal
+from typing import Annotated
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -20,13 +20,20 @@ class Settings(BaseSettings):
     bq_location: str = Field("US")
 
     # ---- Cosmos
+    # Auth is Microsoft Entra ID (managed identity in Azure, az login locally)
+    # by default. The IaC disables shared-key authentication on the Cosmos
+    # account, so production deployments cannot use keys even if they wanted
+    # to. The cosmos_emulator_key escape hatch is for the local Cosmos
+    # emulator (docker-compose) only. See docs/identity.md.
     cosmos_endpoint: str = Field(..., description="https://<acct>.documents.azure.com:443/")
     cosmos_database: str = Field("learnsphere")
-    cosmos_auth_mode: Literal["managed_identity", "key"] = "managed_identity"
-    cosmos_key: str | None = None
     cosmos_verify_tls: bool = True
     cosmos_upsert_concurrency: int = Field(16, ge=1, le=256)
     cosmos_batch_size: int = Field(500, ge=1, le=10_000)
+    cosmos_emulator_key: str | None = Field(
+        default=None,
+        description="Emulator-only shared key. Refused for non-emulator endpoints by validate_runtime().",
+    )
 
     # ---- Sync orchestration
     sync_run_id: str | None = None
@@ -61,9 +68,15 @@ class Settings(BaseSettings):
 
     def validate_runtime(self) -> None:
         """Cross-field checks run on startup; raises ``ValueError`` on misconfig."""
-        if self.cosmos_auth_mode == "key" and not self.cosmos_key:
-            msg = "COSMOS_KEY is required when COSMOS_AUTH_MODE=key"
-            raise ValueError(msg)
+        if self.cosmos_emulator_key:
+            host = self.cosmos_endpoint.split("/", 3)[2].split(":", 1)[0].lower()
+            if host not in {"localhost", "127.0.0.1", "cosmos-emulator"}:
+                msg = (
+                    "cosmos_emulator_key is only valid for the local Cosmos emulator "
+                    f"(localhost / cosmos-emulator); got endpoint host {host!r}. "
+                    "Production deployments must use Microsoft Entra ID."
+                )
+                raise ValueError(msg)
 
 
 def load_settings() -> Settings:

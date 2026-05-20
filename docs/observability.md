@@ -1,12 +1,18 @@
 # observability
 
-Three signals:
+Three signals from the app, plus first-class infra telemetry:
 
 | signal | where | what it tells you |
 | --- | --- | --- |
 | structured logs | Log Analytics (`ContainerAppConsoleLogs_CL`) | per-row failures, per-pipeline summaries, request ids |
 | traces | Application Insights | spans per pipeline + per batch upsert |
 | checkpoints | Cosmos `sync_metadata` | source of truth for run status, counts, watermark |
+| Cosmos diagnostics | Log Analytics (`AzureDiagnostics` / `CDB*` tables) | data-plane requests, query runtime stats, partition-key RU consumption |
+
+Cosmos diagnostic settings ship out of the box: `DataPlaneRequests`,
+`QueryRuntimeStatistics`, `PartitionKeyStatistics`,
+`PartitionKeyRUConsumption`, `ControlPlaneRequests` plus the `Requests`
+metric all stream to the workspace. KQL examples below.
 
 ## `sync_metadata` shape
 
@@ -80,6 +86,25 @@ two manual spans:
 - `pipeline.batch` — attrs `batch.size`, `batch.index`
 
 Follow a pipeline end-to-end: `traces | where customDimensions.pipeline_name == "learners"`.
+
+## Cosmos KQL — top RU consumers and hot partitions
+
+```kusto
+// Most-expensive operations in the last hour
+CDBDataPlaneRequests
+| where TimeGenerated > ago(1h)
+| project TimeGenerated, OperationName, DatabaseName, CollectionName,
+          RequestCharge, DurationMs, StatusCode
+| top 50 by RequestCharge desc
+```
+
+```kusto
+// Partition-key RU consumption — find the hot key
+CDBPartitionKeyRUConsumption
+| where TimeGenerated > ago(1h)
+| summarize total_ru = sum(RequestCharge) by PartitionKey, CollectionName
+| top 10 by total_ru desc
+```
 
 ## Healthy looks like
 

@@ -60,6 +60,37 @@ reasons to add an app registration would be (a) we needed user-delegated
 OAuth, which we don't, or (b) Microsoft Graph API permissions, which we
 don't. So: MI only.
 
+See [identity.md](identity.md) for the full end-to-end identity story
+(Cosmos local-auth-disabled, KV RBAC, ACR pull, the WIF migration path).
+
+## Cosmos: AAD-only, local auth disabled
+
+`local_authentication_disabled = true` on the Cosmos account. The SDK
+rejects any shared-key request. This eliminates an entire class of
+credential-leak incidents and forces every actor — runtime, developers,
+notebooks — through Entra ID with auditable RBAC. The local Cosmos emulator
+still works via a tightly-scoped `COSMOS_EMULATOR_KEY` env var that the app
+refuses for any non-localhost endpoint.
+
+## Networking: Private Endpoints + NAT Gateway
+
+The default network model is what most security baselines require:
+
+- Cosmos and Key Vault are reachable only through Private Endpoints.
+- ACR is Premium with a Private Endpoint (public network access stays on
+  by default so `azd up` works frictionlessly; flip
+  `acr_public_network_access_enabled` to lock it down).
+- Outbound to BigQuery exits through a Standard NAT Gateway with a Static
+  Public IP, so the BigQuery side can pin one egress IP in a VPC Service
+  Controls perimeter. The IP is the `NAT_GATEWAY_EGRESS_IP` output.
+- NSGs on both subnets: snet-cae is deny-by-default outbound with explicit
+  allows for AzureCloud:443 + Internet:443. snet-pe only accepts inbound
+  443 from the vnet.
+
+Customers who want a quicker path can flip the public-access switches and
+add IP allow-lists — Pattern A in [networking.md](networking.md). The IaC
+makes both patterns available with one variable each.
+
 ## GCP auth: SA-key today, WIF next
 
 Today the pipeline authenticates to BigQuery with a long-lived service

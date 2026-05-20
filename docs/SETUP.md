@@ -31,9 +31,13 @@ $EDITOR .env
 | `BQ_LOCATION` | default `US` |
 | `GOOGLE_APPLICATION_CREDENTIALS` | path to GCP SA JSON; mounted at `/secrets/gcp-sa-json` in the image |
 | `COSMOS_ENDPOINT` | account URL, or `https://localhost:8081/` for the emulator |
-| `COSMOS_KEY` | set for the emulator; unset in Azure (managed identity) |
+| `COSMOS_EMULATOR_KEY` | **emulator-only escape hatch** — refused for any non-localhost endpoint. Production uses Microsoft Entra ID (managed identity in Azure, `az login` locally). |
 | `COSMOS_DATABASE` | default `learnsphere` |
 | `SYNC_PIPELINES` | comma-separated, default `courses,learners,recommendations` |
+
+The IaC ships with `local_authentication_disabled = true` on the Cosmos
+account, so shared keys are rejected in production no matter what env vars
+are set. See [identity.md](identity.md) for the full identity story.
 
 ## GCP service account
 

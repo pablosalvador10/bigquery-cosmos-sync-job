@@ -53,3 +53,12 @@ output "SYNC_JOB_RESOURCE_ID" {
   description = "Container App Job ARM resource ID"
   value       = module.sync_job.id
 }
+
+output "NAT_GATEWAY_EGRESS_IP" {
+  description = <<-EOT
+    Deterministic public IP used for all outbound traffic from the sync job
+    (BigQuery API calls in particular). Hand this to the BigQuery side to
+    add to their VPC Service Controls perimeter or any IP allow-list.
+  EOT
+  value       = azurerm_public_ip.nat.ip_address
+}

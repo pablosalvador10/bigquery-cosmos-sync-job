@@ -31,6 +31,31 @@ variable "tags" {
   default     = {}
 }
 
+# --- Container Registry ---
+
+variable "acr_sku" {
+  description = "ACR SKU. Premium is required for Private Endpoints, customer-managed keys, and trusted-services bypass."
+  type        = string
+  default     = "Premium"
+
+  validation {
+    condition     = contains(["Basic", "Standard", "Premium"], var.acr_sku)
+    error_message = "acr_sku must be 'Basic', 'Standard', or 'Premium'."
+  }
+}
+
+variable "acr_public_network_access_enabled" {
+  description = <<-EOT
+    If true, ACR accepts traffic on its public endpoint as well as via the
+    Private Endpoint. Default true so `azd up` works frictionlessly from a
+    developer laptop and ACR Tasks (`remoteBuild: true`) can push images.
+    Flip to false once your CI pushes images from inside the vnet or via a
+    trusted-services exemption. The PE is created either way.
+  EOT
+  type        = bool
+  default     = true
+}
+
 # --- Sync job image / sizing ---
 
 variable "sync_image" {
@@ -141,6 +166,34 @@ variable "cosmos_capacity_mode" {
   validation {
     condition     = contains(["serverless", "autoscale"], var.cosmos_capacity_mode)
     error_message = "cosmos_capacity_mode must be 'serverless' or 'autoscale'."
+  }
+}
+
+variable "cosmos_zone_redundant" {
+  description = "If true, the Cosmos primary region is zone-redundant. Recommended for any production deployment."
+  type        = bool
+  default     = true
+}
+
+variable "cosmos_backup_type" {
+  description = "Cosmos backup type: 'Continuous' (point-in-time restore, recommended) or 'Periodic'."
+  type        = string
+  default     = "Continuous"
+
+  validation {
+    condition     = contains(["Continuous", "Periodic"], var.cosmos_backup_type)
+    error_message = "cosmos_backup_type must be 'Continuous' or 'Periodic'."
+  }
+}
+
+variable "cosmos_continuous_backup_tier" {
+  description = "Continuous-backup retention tier when cosmos_backup_type = 'Continuous'. One of 'Continuous7Days' or 'Continuous30Days'."
+  type        = string
+  default     = "Continuous7Days"
+
+  validation {
+    condition     = contains(["Continuous7Days", "Continuous30Days"], var.cosmos_continuous_backup_tier)
+    error_message = "cosmos_continuous_backup_tier must be 'Continuous7Days' or 'Continuous30Days'."
   }
 }
 

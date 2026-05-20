@@ -4,10 +4,17 @@ Cron-triggered batch sync. BigQuery is the source of truth, Cosmos is the
 serving copy. Runs once a day, ships ~500 MB, exits.
 
 ```
-BigQuery ─► Container App Job (Python, async) ─► Cosmos DB (NoSQL)
-                       │
-                       └─► Log Analytics + App Insights
+                          ┌─ Private Endpoint ─► Cosmos DB (NoSQL, no shared keys)
+BigQuery ──HTTPS via NAT─► Container App Job  ──┼─ Private Endpoint ─► Key Vault
+                          │  (Python, async)    └─ Private Endpoint ─► Container Registry
+                          │
+                          └─► Log Analytics + App Insights
 ```
+
+The vnet, NAT Gateway, NSGs, and Private Endpoints are part of the IaC
+default — see [networking.md](networking.md). The single user-assigned
+managed identity handles every Azure-side authentication — see
+[identity.md](identity.md).
 
 ## How a run works
 

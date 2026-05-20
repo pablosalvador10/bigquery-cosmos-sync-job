@@ -6,14 +6,25 @@
 
 Single resource group:
 
-- Container Apps Environment (wired to Log Analytics)
+- Container Apps Environment (vnet-integrated, wired to Log Analytics)
 - Container App Job (cron, scale-to-zero)
-- Container Registry
-- Cosmos DB for NoSQL (account, database, four containers)
-- Log Analytics workspace + Application Insights
-- Key Vault (holds the GCP SA JSON)
-- User-assigned managed identity (granted Cosmos data-plane RBAC)
+- Container Registry (Premium, Private Endpoint, MI pull only)
+- Cosmos DB for NoSQL — `local_authentication_disabled = true`, zone-redundant,
+  continuous backup (PITR), Private Endpoint only, account + database +
+  four containers
+- Log Analytics workspace + Application Insights, plus a diagnostic setting
+  on Cosmos streaming `DataPlaneRequests` / `QueryRuntimeStatistics` /
+  `PartitionKey*` logs
+- Key Vault (private, RBAC, holds the GCP SA JSON)
+- VNet (10.20.0.0/16) with `snet-cae` (delegated, NSG) and `snet-pe` (NSG)
+- NAT Gateway + Standard Public IP for deterministic egress to BigQuery
+- Private DNS zones for `documents.azure.com`, `vaultcore.azure.net`,
+  `azurecr.io` — linked to the vnet
+- User-assigned managed identity (Cosmos data RBAC, AcrPull, KV Secrets Officer)
 - 4 alert rules — see [observability.md](observability.md)
+
+End-to-end identity story: [identity.md](identity.md).
+End-to-end network story: [networking.md](networking.md).
 
 ## First deploy
 
@@ -28,11 +39,20 @@ azd up
 Phases:
 
 1. Terraform `apply`.
-2. `infra/scripts/postprovision.sh` — uploads the SA JSON to Key Vault as
-   `gcp-sa-json` (no dots — Container App secret rule), grants the job's
-   managed identity Cosmos data RBAC, creates the four containers.
+2. The **secret-bootstrap** Container App Job runs once inside the vnet,
+   reading the SA JSON from a Terraform-managed secret and writing it to
+   the private Key Vault. This is how a private vault gets populated without
+   ever opening its public endpoint to a developer laptop.
 3. Docker build (multi-stage, non-root uid 1000) → push to ACR.
 4. Container App Job updated to the new image.
+
+After the first deploy, capture the egress IP to share with the BigQuery
+owner so they can pin it in a VPC Service Controls perimeter or any other
+network allow-list:
+
+```bash
+terraform -chdir=infra output -raw NAT_GATEWAY_EGRESS_IP
+```
 
 ## Day-2
 
@@ -55,8 +75,11 @@ pytest across the app + both kits, plus `terraform fmt -check` and
 
 - GCP SA JSON → Key Vault secret `gcp-sa-json` → mounted at
   `/secrets/gcp-sa-json` → `GOOGLE_APPLICATION_CREDENTIALS` points there.
-- Cosmos: no key. Managed identity → built-in
-  `Cosmos DB Built-in Data Contributor` role on the account.
+  Production target is [Workload Identity Federation](../examples/wif/),
+  which eliminates this last long-lived credential.
+- Cosmos: **no key**. The account ships with shared-key auth disabled.
+  The MI uses a custom data-plane role on the account.
+- ACR: no admin user. The MI has `AcrPull`.
 
 ## Sizing
 

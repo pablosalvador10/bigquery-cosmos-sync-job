@@ -29,6 +29,24 @@ joined in SQL into three denormalized Cosmos containers (`courses`,
 `learners`, `recommendations`). Joins and aggregations live in SQL; Python
 projects rows into documents. Swap the domain by replacing the pipelines.
 
+## What this template gives you
+
+A polished, enterprise-ready answer to the two questions every customer
+asks first when moving data from BigQuery to Cosmos:
+
+- **Identity.** One user-assigned managed identity, end to end. Cosmos
+  ships with `local_authentication_disabled = true` (no shared keys), ACR
+  admin is off, Key Vault is RBAC + private. The only long-lived credential
+  is the GCP service-account JSON, and there's a drop-in
+  [Workload Identity Federation example](examples/wif/) to delete that too.
+  → [docs/identity.md](docs/identity.md)
+- **Networking.** Cosmos, Key Vault, and ACR are reached over Private
+  Endpoints. The Container Apps environment is vnet-integrated. Outbound
+  to BigQuery exits through a NAT Gateway with a stable public IP that the
+  BigQuery side can pin in a VPC Service Controls perimeter — the IP is
+  the `NAT_GATEWAY_EGRESS_IP` Terraform output. NSGs on both subnets.
+  → [docs/networking.md](docs/networking.md)
+
 ## Quick start
 
 ```bash
