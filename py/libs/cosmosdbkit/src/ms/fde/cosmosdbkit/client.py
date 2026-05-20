@@ -32,6 +32,7 @@ class CosmosKitClient:
         key: str | None = None,
         credential: Any | None = None,
         client_factory: Any | None = None,
+        connection_verify: bool = True,
     ) -> None:
         if not endpoint:
             msg = "Cosmos DB endpoint is required"
@@ -41,6 +42,7 @@ class CosmosKitClient:
         self._key = key
         self._explicit_credential = credential
         self._client_factory = client_factory  # injection seam for tests
+        self._connection_verify = connection_verify
         self._client: Any | None = None
         self._owned_credential: Any | None = None
 
@@ -64,7 +66,10 @@ class CosmosKitClient:
 
         from azure.cosmos.aio import CosmosClient  # heavy SDK
 
-        return CosmosClient(url=self._endpoint, credential=cred)
+        kwargs: dict[str, Any] = {}
+        if not self._connection_verify:
+            kwargs["connection_verify"] = False
+        return CosmosClient(url=self._endpoint, credential=cred, **kwargs)
 
     def _ensure_client(self) -> Any:
         if self._client is None:

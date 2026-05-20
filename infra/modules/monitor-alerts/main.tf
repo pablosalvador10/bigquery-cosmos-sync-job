@@ -74,6 +74,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "job_failed" {
   scopes                           = [var.log_analytics_workspace_id]
   auto_mitigation_enabled          = true
   workspace_alerts_storage_enabled = false
+  skip_query_validation            = true
 
   criteria {
     query                   = <<-KQL
@@ -106,6 +107,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "partial_failure" {
   window_duration         = "PT1H"
   scopes                  = [var.log_analytics_workspace_id]
   auto_mitigation_enabled = true
+  skip_query_validation   = true
 
   criteria {
     query                   = <<-KQL
@@ -140,6 +142,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "missing_success" {
   window_duration         = "PT2H"
   scopes                  = [var.log_analytics_workspace_id]
   auto_mitigation_enabled = true
+  skip_query_validation   = true
 
   criteria {
     query                   = <<-KQL
@@ -179,6 +182,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "abnormal_volume" {
   window_duration         = "P1D"
   scopes                  = [var.log_analytics_workspace_id]
   auto_mitigation_enabled = true
+  skip_query_validation   = true
 
   criteria {
     query                   = <<-KQL

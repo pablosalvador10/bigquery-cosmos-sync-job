@@ -5,7 +5,6 @@ FROM python:3.12-slim AS builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    UV_SYSTEM_PYTHON=1 \
     UV_LINK_MODE=copy
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -31,18 +30,18 @@ FROM python:3.12-slim AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PATH="/workspace/py/apps/bq-cosmos-sync/.venv/bin:${PATH}"
+    PATH="/workspace/py/.venv/bin:${PATH}"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
-    && groupadd --gid 1000 sync \
-    && useradd  --uid 1000 --gid 1000 --create-home --shell /sbin/nologin sync
+    && groupadd --gid 1000 app \
+    && useradd  --uid 1000 --gid 1000 --create-home --shell /sbin/nologin app
 
 WORKDIR /workspace
-COPY --from=builder --chown=sync:sync /workspace /workspace
+COPY --from=builder --chown=app:app /workspace /workspace
 
-USER sync
+USER app
 
 ENTRYPOINT ["python", "-m", "bq_cosmos_sync"]
 CMD ["run"]
