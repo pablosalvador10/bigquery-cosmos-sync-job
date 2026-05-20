@@ -1,0 +1,25 @@
+[project]
+name = "template-agentic-ai-apps-azure-py"
+version = "0.1.0"
+description = "Python workspace for the agentic Azure app template"
+requires-python = ">=3.11"
+
+dependencies = []
+
+[tool.uv.workspace]
+members = [
+  "apps/app-template",
+  "apps/sample-eval-e2e",
+  "libs/foundrykit",
+  "libs/agentkit",
+  "libs/evalkit",
+  "libs/synthetickit",
+  "libs/testkit",
+  "mcp/mcp-server-template",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
+[tool.uv]
+package = false

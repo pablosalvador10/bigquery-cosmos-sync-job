@@ -1,0 +1,26 @@
+[project]
+name = "synthetickit"
+version = "0.1.0"
+description = "Domain-agnostic synthetic data generation framework for agentic AI apps"
+requires-python = ">=3.11"
+dependencies = [
+  "pydantic>=2.10.0",
+  "pyyaml>=6.0.0",
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=8.3.0",
+  "pytest-asyncio>=0.24.0",
+  "ruff>=0.8.0",
+]
+
+[tool.uv]
+package = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

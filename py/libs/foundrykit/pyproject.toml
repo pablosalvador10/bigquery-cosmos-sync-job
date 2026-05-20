@@ -1,0 +1,19 @@
+[project]
+name = "foundrykit"
+version = "0.1.0"
+description = "Reusable Azure AI Foundry helper library"
+requires-python = ">=3.11"
+dependencies = [
+  "azure-ai-agents>=1.2.0b3,<2.0.0",
+  "azure-identity>=1.19.0",
+  "pydantic-settings>=2.7.0",
+  "structlog>=24.4.0",
+  "opentelemetry-api>=1.29.0",
+]
+
+[tool.uv]
+package = true
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

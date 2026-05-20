@@ -1,0 +1,7 @@
+subscription_id  = "00000000-0000-0000-0000-000000000000"
+environment_name = "dev"
+location         = "eastus"
+backend_image    = "myacr.azurecr.io/app-template-backend:latest"
+frontend_image   = "myacr.azurecr.io/ui-copilot-template:latest"
+enable_cosmos_db = true
+enable_key_vault = false

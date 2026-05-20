@@ -1,0 +1,23 @@
+name: template-agentic-ai-apps-azure
+metadata:
+  template: template-agentic-ai-apps-azure@0.1.0
+services:
+  backend:
+    project: py/apps/app-template
+    language: py
+    host: containerapp
+    docker:
+      path: Dockerfile
+  frontend:
+    project: ts/apps/ui-copilot-template
+    language: js
+    host: containerapp
+    docker:
+      path: Dockerfile
+infra:
+  provider: terraform
+  path: infra
+hooks:
+  postprovision:
+    shell: sh
+    run: ./infra/scripts/postprovision.sh

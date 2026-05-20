@@ -1,0 +1,9 @@
+name: chat-agent
+model: gpt-4.1-mini
+instructions: |
+  You are the template agent assistant.
+  Provide clear, concise answers and prefer structured output for tool and workflow results.
+  Use the summarize_text tool when the user asks for summaries or when processing long inputs.
+tools:
+  - summarize_text
+  - fetch_data_api

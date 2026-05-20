@@ -1,0 +1,28 @@
+version: "3.9"
+
+services:
+  backend:
+    build:
+      context: ./py/apps/app-template
+      dockerfile: Dockerfile
+    container_name: app-template-backend
+    env_file:
+      - .env.example
+    ports:
+      - "8001:8001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  frontend:
+    build:
+      context: ./ts/apps/ui-copilot-template
+      dockerfile: Dockerfile
+    container_name: app-template-frontend
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "5173:80"

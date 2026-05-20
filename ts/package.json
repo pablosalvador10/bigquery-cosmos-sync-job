@@ -1,0 +1,12 @@
+{
+  "name": "template-agentic-ai-apps-azure-ts",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@10.0.0",
+  "scripts": {
+    "dev": "pnpm --filter ui-copilot-template dev",
+    "build": "pnpm --filter ui-copilot-template build",
+    "lint": "pnpm --filter ui-copilot-template lint",
+    "typecheck": "pnpm --filter ui-copilot-template typecheck"
+  }
+}

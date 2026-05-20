@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  pull_request:
+    paths:
+      - "py/**"
+      - "ts/**"
+      - ".github/workflows/ci.yml"
+      - ".github/instructions/**"
+      - "README.md"
+  push:
+    branches: [main]
+    paths:
+      - "py/**"
+      - "ts/**"
+      - ".github/workflows/ci.yml"
+      - ".github/instructions/**"
+      - "README.md"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v7
+      - name: Install backend dependencies
+        run: |
+          uv pip install --system -e py/libs/foundrykit -e py/libs/agentkit -e py/libs/testkit -e py/libs/evalkit -e py/libs/synthetickit -e py/apps/app-template[dev]
+      - name: Lint Python
+        run: ruff check py
+      - name: Test backend app
+        working-directory: py/apps/app-template
+        run: pytest -q
+      - name: Test Python libs
+        run: |
+          pytest -q py/libs/foundrykit/tests py/libs/agentkit/tests py/libs/testkit/tests py/libs/evalkit/tests py/libs/synthetickit/tests
+
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: ts
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: ts/package.json
+      - name: Install frontend dependencies
+        run: pnpm install --no-frozen-lockfile
+      - name: Lint frontend
+        run: pnpm --filter ui-copilot-template lint
+      - name: Typecheck frontend
+        run: pnpm --filter ui-copilot-template typecheck
+      - name: Test frontend
+        run: pnpm --filter ui-copilot-template test
+      - name: Build frontend
+        run: pnpm --filter ui-copilot-template build
